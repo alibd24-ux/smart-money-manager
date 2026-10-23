@@ -1,0 +1,73 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 3. Setup Java JDK 21 (Required for Capacitor 6)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: 4. Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 5. Initialize Capacitor & Install Native PDF Plugins
+        run: |
+          mkdir -p www
+          cp index.html www/index.html
+          npm init -y
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          npm install @capacitor/filesystem@6 @capacitor/share@6 @capacitor-community/file-opener@6
+          npx cap init "Smart Money Manager" "com.smartmoney.tracker" --web-dir www
+          npx cap add android
+
+      - name: 6. Set Custom App Icon (If icon.png exists in repo)
+        run: |
+          if [ -f "icon.png" ]; then
+            mkdir -p assets
+            cp icon.png assets/icon.png
+            cp icon.png assets/splash.png
+            npm install -D @capacitor/assets
+            npx capacitor-assets generate --android
+          fi
+
+      - name: 7. Inject Android Storage Permissions & Sync
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          
+          # Enable Cleartext Traffic & Legacy External Storage for Download folder
+          sed -i 's/<application/<application android:usesCleartextTraffic="true" android:requestLegacyExternalStorage="true"/g' "$MANIFEST"
+          
+          # Add Read/Write Storage Permissions
+          sed -i 's/<application/<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" \/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" \/>\n    <application/g' "$MANIFEST"
+          
+          npx cap sync android
+
+      - name: 8. Build Debug APK with Gradle
+        working-directory: ./android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: 9. Upload Ready-to-Install APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Smart-Money-Manager-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          
